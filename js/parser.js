@@ -180,42 +180,84 @@ function evaluateFormula(workbook, formula, errorDescription) {
         return null;
     }
     
-    // Сложная формула с И и СУММ
-    const complexFormulaRegex = /=И\('([^']+)'!\$?([A-Z]+)\$?(\d+)=(\d+);\s*СУММ\('([^']+)'!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)\)([><]=?)(\d+)\)/;
-    const complexMatch = cleanFormula.match(complexFormulaRegex);
-    if (complexMatch) {
-        const conditionSection = complexMatch[1];
-        const conditionCell = complexMatch[2] + complexMatch[3];
-        const conditionValue = parseInt(complexMatch[4]);
+    // Сложная формула с И и СУММ (для Раздел 2, строки с диапазоном)
+    // Пример: =И(СУММ('Раздел 2'!$Q11:$R11)<'Раздел 2'!$L11)
+    const sumCompareRegex = /=И\(СУММ\('([^']+)'!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)\)([><]=?)'([^']+)'!\$?([A-Z]+)\$?(\d+)\)/;
+    const sumMatch = cleanFormula.match(sumCompareRegex);
+    if (sumMatch) {
+        const sumSection = sumMatch[1];
+        const sumStartCol = sumMatch[2];
+        const sumStartRow = parseInt(sumMatch[3]);
+        const sumEndCol = sumMatch[4];
+        const sumEndRow = parseInt(sumMatch[5]);
+        const operator = sumMatch[6];
+        const compareSection = sumMatch[7];
+        const compareCol = sumMatch[8];
+        const compareRow = parseInt(sumMatch[9]);
         
-        const sumSection = complexMatch[5];
-        const sumStart = complexMatch[6] + complexMatch[7];
-        const sumEnd = complexMatch[8] + complexMatch[9];
-        const sumOperator = complexMatch[10];
-        const sumThreshold = parseFloat(complexMatch[11]);
+        // Вычисляем сумму диапазона
+        const sumResult = calculateSumRange(workbook, sumSection, sumStartCol + sumStartRow, sumEndCol + sumEndRow);
+        // Получаем значение для сравнения
+        const compareValue = getCellValue(workbook, compareSection, compareCol + compareRow);
         
-        const condValue = getCellValue(workbook, conditionSection, conditionCell);
+        let conditionMet = false;
+        if (operator === '<') conditionMet = sumResult < compareValue;
+        else if (operator === '<=') conditionMet = sumResult <= compareValue;
+        else if (operator === '>') conditionMet = sumResult > compareValue;
+        else if (operator === '>=') conditionMet = sumResult >= compareValue;
+        else if (operator === '=') conditionMet = sumResult === compareValue;
+        else if (operator === '<>') conditionMet = sumResult !== compareValue;
         
-        if (condValue === conditionValue) {
-            // Условие выполнено, проверяем сумму
-            const sumResult = calculateSumRange(workbook, sumSection, sumStart, sumEnd);
-            
-            let sumConditionMet = false;
-            if (sumOperator === '>') sumConditionMet = sumResult > sumThreshold;
-            else if (sumOperator === '>=') sumConditionMet = sumResult >= sumThreshold;
-            else if (sumOperator === '<') sumConditionMet = sumResult < sumThreshold;
-            else if (sumOperator === '<=') sumConditionMet = sumResult <= sumThreshold;
-            else if (sumOperator === '=') sumConditionMet = sumResult === sumThreshold;
-            else if (sumOperator === '<>') sumConditionMet = sumResult !== sumThreshold;
-            
-            if (!sumConditionMet) {
-                return {
-                    isError: true,
-                    section: conditionSection,
-                    cells: [conditionCell],
-                    description: errorDescription
-                };
+        // Если формула возвращает TRUE -> это ошибка (по логике наших правил)
+        if (conditionMet) {
+            // Определяем ячейки для ошибки
+            const errorCells = [];
+            for (let c = colToIndex(sumStartCol); c <= colToIndex(sumEndCol); c++) {
+                errorCells.push(indexToCol(c) + sumStartRow);
             }
+            errorCells.push(compareCol + compareRow);
+            
+            return {
+                isError: true,
+                section: sumSection,
+                cells: errorCells,
+                description: errorDescription
+            };
+        }
+        return null;
+    }
+    
+    // Сложная формула с И, СУММ и <> (не равно)
+    // Пример: =И(СУММ('Раздел 2'!$AE11:$AF11)<>'Раздел 2'!$K11)
+    const sumNotEqualRegex = /=И\(СУММ\('([^']+)'!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)\)<>'([^']+)'!\$?([A-Z]+)\$?(\d+)\)/;
+    const sumNeMatch = cleanFormula.match(sumNotEqualRegex);
+    if (sumNeMatch) {
+        const sumSection = sumNeMatch[1];
+        const sumStartCol = sumNeMatch[2];
+        const sumStartRow = parseInt(sumNeMatch[3]);
+        const sumEndCol = sumNeMatch[4];
+        const sumEndRow = parseInt(sumNeMatch[5]);
+        const compareSection = sumNeMatch[6];
+        const compareCol = sumNeMatch[7];
+        const compareRow = parseInt(sumNeMatch[8]);
+        
+        const sumResult = calculateSumRange(workbook, sumSection, sumStartCol + sumStartRow, sumEndCol + sumEndRow);
+        const compareValue = getCellValue(workbook, compareSection, compareCol + compareRow);
+        
+        // Ошибка если сумма НЕ равна значению
+        if (sumResult !== compareValue) {
+            const errorCells = [];
+            for (let c = colToIndex(sumStartCol); c <= colToIndex(sumEndCol); c++) {
+                errorCells.push(indexToCol(c) + sumStartRow);
+            }
+            errorCells.push(compareCol + compareRow);
+            
+            return {
+                isError: true,
+                section: sumSection,
+                cells: errorCells,
+                description: errorDescription
+            };
         }
         return null;
     }
@@ -262,6 +304,18 @@ function colToIndex(colStr) {
 }
 
 /**
+ * Преобразует индекс столбца обратно в букву
+ */
+function indexToCol(index) {
+    let result = '';
+    while (index >= 0) {
+        result = String.fromCharCode((index % 26) + 'A'.charCodeAt(0)) + result;
+        index = Math.floor(index / 26) - 1;
+    }
+    return result;
+}
+
+/**
  * Основная функция проверки всех правил из ruleset.json
  */
 async function validateWorkbook(workbook) {
@@ -272,9 +326,11 @@ async function validateWorkbook(workbook) {
         const errors = [];
         
         for (const rule of rules) {
-            // Если есть диапазон, обрабатываем каждую строку отдельно
-            if (rule.range) {
-                const [startRow, endRow] = rule.range.split(':').map(Number);
+            // Если есть диапазон строк (rows), обрабатываем каждую строку отдельно
+            if (rule.rows && rule.rows.length > 0) {
+                // Парсим диапазон строк (например "11-323")
+                const rowRange = rule.rows[0]; // Берем первый диапазон
+                const [startRow, endRow] = rowRange.split('-').map(Number);
                 
                 for (let row = startRow; row <= endRow; row++) {
                     // Заменяем номер строки в формуле и сообщении об ошибке
