@@ -1,0 +1,17 @@
+stages:
+  - build
+  - deploy
+
+build:
+  stage: build
+  script:
+    - docker compose build
+
+deploy:
+  stage: deploy
+  environment:
+    name: production
+  script:
+    - docker compose up -d
+  only:
+    - main
