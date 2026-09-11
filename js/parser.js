@@ -272,14 +272,36 @@ async function validateWorkbook(workbook) {
         const errors = [];
         
         for (const rule of rules) {
-            const result = evaluateFormula(workbook, rule.formula, rule.error);
-            if (result && result.isError) {
-                errors.push({
-                    section: result.section,
-                    cell: result.cells.length === 1 ? result.cells[0] : result.cells.join(', '),
-                    cells: result.cells,
-                    description: result.description
-                });
+            // Если есть диапазон, обрабатываем каждую строку отдельно
+            if (rule.range) {
+                const [startRow, endRow] = rule.range.split(':').map(Number);
+                
+                for (let row = startRow; row <= endRow; row++) {
+                    // Заменяем номер строки в формуле и сообщении об ошибке
+                    let adaptedFormula = adaptFormulaForRow(rule.formula, row);
+                    let adaptedError = adaptErrorForRow(rule.error, row);
+                    
+                    const result = evaluateFormula(workbook, adaptedFormula, adaptedError);
+                    if (result && result.isError) {
+                        errors.push({
+                            section: result.section,
+                            cell: result.cells.length === 1 ? result.cells[0] : result.cells.join(', '),
+                            cells: result.cells,
+                            description: result.description
+                        });
+                    }
+                }
+            } else {
+                // Обычная проверка без диапазона
+                const result = evaluateFormula(workbook, rule.formula, rule.error);
+                if (result && result.isError) {
+                    errors.push({
+                        section: result.section,
+                        cell: result.cells.length === 1 ? result.cells[0] : result.cells.join(', '),
+                        cells: result.cells,
+                        description: result.description
+                    });
+                }
             }
         }
         
@@ -288,4 +310,34 @@ async function validateWorkbook(workbook) {
         console.error('Ошибка при загрузке или обработке ruleset.json:', error);
         return [];
     }
+}
+
+/**
+ * Адаптирует формулу для конкретной строки
+ * Заменяет все вхождения номеров строк в формуле на указанный номер
+ */
+function adaptFormulaForRow(formula, rowNum) {
+    // Заменяем все номера строк в формуле (после $ или без)
+    // Например: $Q11:$R11 -> $Q25:$R25, L11 -> L25
+    return formula.replace(/\$(\d+)|(\d+)/g, (match, dollarRow, plainRow) => {
+        if (dollarRow) {
+            return '$' + rowNum;
+        }
+        if (plainRow) {
+            // Проверяем, что это действительно номер строки (после буквы столбца)
+            const precedingChar = formula[formula.indexOf(match) - 1];
+            if (precedingChar && /[A-Z]/i.test(precedingChar)) {
+                return rowNum;
+            }
+        }
+        return match;
+    });
+}
+
+/**
+ * Адаптирует сообщение об ошибке для конкретной строки
+ * Заменяет ??? на номер строки
+ */
+function adaptErrorForRow(errorTemplate, rowNum) {
+    return errorTemplate.replace('???', rowNum);
 }
