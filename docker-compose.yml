@@ -1,0 +1,7 @@
+services:
+  stat-app:
+    build: .
+    image: stat-app
+    container_name: stat-app
+    ports:
+      - "8002:8002"

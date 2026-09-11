@@ -102,10 +102,15 @@ function displayResults(errors) {
         errorsHtml += '<div class="error-list">';
         
         errors.forEach(error => {
+            // Каждая ячейка — отдельный тег, чтобы не сливались в одно пятно.
+            const cellTags = error.cellList
+                .map(cell => `<span class="error-tag tag-cell">${cell}</span>`)
+                .join('');
+
             errorsHtml += `
                 <div class="error-item">
                     <span class="error-tag tag-section">${error.section}</span>
-                    <span class="error-tag tag-cell">${error.cell}</span>
+                    ${cellTags}
                     <span class="error-description">${error.description}</span>
                 </div>
             `;

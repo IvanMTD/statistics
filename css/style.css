@@ -104,6 +104,8 @@ body {
 .tag-cell {
     background-color: #17a2b8;
     color: #fff;
+    white-space: nowrap;
+    margin-bottom: 0.25rem;
 }
 
 .error-description {
