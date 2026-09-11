@@ -7,4 +7,4 @@ COPY css /usr/share/nginx/html/css
 COPY js /usr/share/nginx/html/js
 COPY ruleset.json /usr/share/nginx/html/ruleset.json
 
-EXPOSE 8002
+EXPOSE 80
