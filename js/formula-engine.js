@@ -163,6 +163,7 @@
             if (ch === ')') { tokens.push({ type: 'rparen' }); i++; continue; }
             if (ch === ';' || ch === ',') { tokens.push({ type: 'sep' }); i++; continue; }
             if (ch === ':') { tokens.push({ type: 'colon' }); i++; continue; }
+            if (ch === '@') { tokens.push({ type: 'current' }); i++; continue; }
 
             if (WORD_START.test(ch)) {
                 let j = i;
@@ -230,6 +231,7 @@
 
             if (t.type === 'number' || t.type === 'string') return { type: 'literal', value: t.value };
             if (t.type === 'err') return { type: 'literal', value: error(t.value) };
+            if (t.type === 'current') return { type: 'current' };
             if (t.type === 'ref') { pos--; return readRefOrRange(null); }
             if (t.type === 'sheet') return readRefOrRange(t.value);
             if (t.type === 'lparen') {
@@ -336,7 +338,7 @@
         return out;
     }
 
-    function createContext(workbook) {
+    function createContext(workbook, current) {
         const sheets = (workbook && workbook.Sheets) || {};
         const names = Object.keys(sheets);
         const cache = {};
@@ -351,13 +353,20 @@
             return found;
         }
 
+        function rawCell(sheet, col, row) {
+            if (!sheet || !sheets[sheet]) return null;
+            return sheets[sheet][cellAddress(col, row)] || null;
+        }
+
         function readCell(sheet, col, row) {
             if (!sheet || !sheets[sheet]) return error(ERR.REF);
-            const cell = sheets[sheet][cellAddress(col, row)];
+            const cell = rawCell(sheet, col, row);
             return cell ? cell.v : undefined;
         }
 
-        return { sheets: sheets, resolveSheet: resolveSheet, readCell: readCell };
+        const cur = (current && current.sheet) ? { sheet: resolveSheet(current.sheet), col: current.col, row: current.row } : null;
+
+        return { sheets: sheets, resolveSheet: resolveSheet, readCell: readCell, rawCell: rawCell, current: cur };
     }
 
     function evalBinary(node, ctx) {
@@ -390,6 +399,13 @@
         switch (node.type) {
             case 'literal':
                 return { value: node.value, cells: [] };
+
+            case 'current': {
+                if (!ctx.current) return { value: error(ERR.REF), cells: [] };
+                const sheet = ctx.current.sheet, col = ctx.current.col, row = ctx.current.row;
+                const value = ctx.readCell(sheet, col, row);
+                return { value: value, cells: [{ sheet: sheet, col: col, row: row, address: cellAddress(col, row), value: value }] };
+            }
 
             case 'ref': {
                 const sheet = ctx.resolveSheet(node.sheet);
@@ -552,6 +568,21 @@
         'ЕЛОГИЧ': predicate(function (v) { return typeof v === 'boolean'; }),
         'ЕОШИБКА': predicate(isError),
         'ЕНД': predicate(function (v) { return isError(v) && v.code === ERR.NA; }),
+        'ЕФОРМУЛА': function (args, ctx) {
+            const arg = args[0];
+            let sheet, col, row;
+            if (arg && arg.type === 'current') {
+                if (!ctx.current) return { value: error(ERR.REF), cells: [] };
+                sheet = ctx.current.sheet; col = ctx.current.col; row = ctx.current.row;
+            } else if (arg && arg.type === 'ref') {
+                sheet = ctx.resolveSheet(arg.sheet); col = arg.col; row = arg.row;
+            } else {
+                return { value: error(ERR.VALUE), cells: [] };
+            }
+            const cell = ctx.rawCell(sheet, col, row);
+            const has = !!(cell && cell.f != null && cell.f !== '');
+            return { value: has, cells: [{ sheet: sheet, col: col, row: row, address: cellAddress(col, row), value: cell ? cell.v : undefined }] };
+        },
 
         /* --- текст --- */
         'ДЛСТР': eager(function (v) { return toText(v[0]).length; }),
@@ -741,7 +772,7 @@
         AND: 'И', OR: 'ИЛИ', NOT: 'НЕ', IF: 'ЕСЛИ', IFERROR: 'ЕСЛИОШИБКА',
         TRUE: 'ИСТИНА', FALSE: 'ЛОЖЬ',
         ISNUMBER: 'ЕЧИСЛО', ISTEXT: 'ЕТЕКСТ', ISBLANK: 'ЕПУСТО', ISLOGICAL: 'ЕЛОГИЧ',
-        ISERROR: 'ЕОШИБКА', ISNA: 'ЕНД',
+        ISERROR: 'ЕОШИБКА', ISNA: 'ЕНД', ISFORMULA: 'ЕФОРМУЛА',
         LEN: 'ДЛСТР', TRIM: 'СЖПРОБЕЛЫ', UPPER: 'ПРОПИСН', LOWER: 'СТРОЧН',
         LEFT: 'ЛЕВСИМВ', RIGHT: 'ПРАВСИМВ', MID: 'ПСТР', CONCAT: 'СЦЕПИТЬ', CONCATENATE: 'СЦЕПИТЬ',
         SUBSTITUTE: 'ПОДСТАВИТЬ', REPT: 'ПОВТОР', FIND: 'НАЙТИ', SEARCH: 'ПОИСК', VALUE: 'ЗНАЧЕН',
@@ -759,8 +790,8 @@
 
     /* ===================== публичный интерфейс ===================== */
 
-    function evaluateAst(ast, workbook) {
-        const ctx = createContext(workbook);
+    function evaluateAst(ast, workbook, current) {
+        const ctx = createContext(workbook, current);
         const r = evalNode(ast, ctx);
         const value = scalar(r.value);
         const err = isError(value);

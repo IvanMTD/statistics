@@ -26,7 +26,34 @@
         return out;
     }
 
+    // "Раздел 2!I11:J16" или "I11:J16" -> { sheet, from:{col,row}, to:{col,row} }
+    function parseRangeSpec(spec) {
+        const s = String(spec).trim();
+        const bang = s.lastIndexOf('!');
+        let sheet = null, rangeStr = s;
+        if (bang !== -1) {
+            sheet = s.slice(0, bang).replace(/^'/, '').replace(/'$/, '');
+            rangeStr = s.slice(bang + 1);
+        }
+        const m = rangeStr.match(/^\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?$/);
+        if (!m) return null;
+        return {
+            sheet: sheet,
+            from: { col: m[1].toUpperCase(), row: +m[2] },
+            to: m[3] ? { col: m[3].toUpperCase(), row: +m[4] } : { col: m[1].toUpperCase(), row: +m[2] }
+        };
+    }
+
     function unique(list) { return Array.from(new Set(list)); }
+
+    function dedupeCells(cells) {
+        const seen = {}, out = [];
+        for (const c of cells) {
+            const key = (c.sheet || '') + '!' + c.address;
+            if (!seen[key]) { seen[key] = true; out.push(c); }
+        }
+        return out;
+    }
 
     function formatValue(value) {
         if (value === undefined || value === null || value === '') return '(пусто)';
@@ -81,6 +108,27 @@
                 ast = ENGINE.parseFormula(rule.formula);
             } catch (e) {
                 console.error('Правило ' + (rule.id === undefined ? '?' : rule.id) + ': ошибка разбора формулы «' + rule.formula + '»', e);
+                continue;
+            }
+
+            if (rule.ranges && rule.ranges.length) {
+                const found = [];
+                for (const spec of rule.ranges) {
+                    const r = parseRangeSpec(spec);
+                    if (!r) {
+                        console.error('Правило ' + (rule.id === undefined ? '?' : rule.id) + ': не удалось разобрать диапазон «' + spec + '»');
+                        continue;
+                    }
+                    const c1 = ENGINE.colToIndex(r.from.col), c2 = ENGINE.colToIndex(r.to.col);
+                    for (let row = r.from.row; row <= r.to.row; row++) {
+                        for (let c = c1; c <= c2; c++) {
+                            const result = ENGINE.evaluateAst(ast, workbook, { sheet: r.sheet, col: ENGINE.indexToCol(c), row: row });
+                            if (result.truthy) found.push.apply(found, result.cells);
+                        }
+                    }
+                }
+                const cells = dedupeCells(found);
+                if (cells.length) errors.push(buildError(rule, { cells: cells }, null));
                 continue;
             }
 
