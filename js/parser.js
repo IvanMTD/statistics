@@ -1,10 +1,13 @@
 /*
- * Проверка книги Excel по правилам из внешнего ruleset.json.
+ * Проверка книги Excel по правилам из ruleset.json.
  * Вся работа с формулами делегируется движку js/formula-engine.js.
  */
 (function (global) {
     'use strict';
 
+    // Временно локально для тестирования.
+    // Для продакшена вернуть: const RULESET_URL = 'https://cdn.s3.fcpsr.ru/stat/ruleset.json';
+    // const RULESET_URL = 'ruleset.json';
     const RULESET_URL = 'https://cdn.s3.fcpsr.ru/stat/ruleset.json';
 
     const ENGINE = (typeof module !== 'undefined' && module.exports)

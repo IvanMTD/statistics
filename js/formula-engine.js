@@ -163,7 +163,12 @@
             if (ch === ')') { tokens.push({ type: 'rparen' }); i++; continue; }
             if (ch === ';' || ch === ',') { tokens.push({ type: 'sep' }); i++; continue; }
             if (ch === ':') { tokens.push({ type: 'colon' }); i++; continue; }
-            if (ch === '@') { tokens.push({ type: 'current' }); i++; continue; }
+            if (ch === '@') {
+                const m = /^@#(\d+)/.exec(src.slice(i));
+                if (m) { tokens.push({ type: 'current', row: parseInt(m[1], 10) }); i += m[0].length; }
+                else { tokens.push({ type: 'current' }); i++; }
+                continue;
+            }
 
             if (WORD_START.test(ch)) {
                 let j = i;
@@ -231,7 +236,7 @@
 
             if (t.type === 'number' || t.type === 'string') return { type: 'literal', value: t.value };
             if (t.type === 'err') return { type: 'literal', value: error(t.value) };
-            if (t.type === 'current') return { type: 'current' };
+            if (t.type === 'current') return { type: 'current', row: t.row };
             if (t.type === 'ref') { pos--; return readRefOrRange(null); }
             if (t.type === 'sheet') return readRefOrRange(t.value);
             if (t.type === 'lparen') {
@@ -402,7 +407,8 @@
 
             case 'current': {
                 if (!ctx.current) return { value: error(ERR.REF), cells: [] };
-                const sheet = ctx.current.sheet, col = ctx.current.col, row = ctx.current.row;
+                const sheet = ctx.current.sheet, col = ctx.current.col;
+                const row = node.row != null ? node.row : ctx.current.row;
                 const value = ctx.readCell(sheet, col, row);
                 return { value: value, cells: [{ sheet: sheet, col: col, row: row, address: cellAddress(col, row), value: value }] };
             }
@@ -573,7 +579,8 @@
             let sheet, col, row;
             if (arg && arg.type === 'current') {
                 if (!ctx.current) return { value: error(ERR.REF), cells: [] };
-                sheet = ctx.current.sheet; col = ctx.current.col; row = ctx.current.row;
+                sheet = ctx.current.sheet; col = ctx.current.col;
+                row = arg.row != null ? arg.row : ctx.current.row;
             } else if (arg && arg.type === 'ref') {
                 sheet = ctx.resolveSheet(arg.sheet); col = arg.col; row = arg.row;
             } else {
@@ -632,6 +639,7 @@
         'НАЙТИ': eager(function (v) { return findText(v, false); }),
         'ПОИСК': eager(function (v) { return findText(v, true); }),
         'ЗНАЧЕН': eager(function (v) { return toNumber(v[0]); }),
+        'СОВПАД': eager(function (v) { return toText(v[0]) === toText(v[1]); }),
 
         /* --- математика --- */
         'СУММ': aggregate(function (nums) { return nums.reduce(function (a, b) { return a + b; }, 0); }, 0),
@@ -775,7 +783,7 @@
         ISERROR: 'ЕОШИБКА', ISNA: 'ЕНД', ISFORMULA: 'ЕФОРМУЛА',
         LEN: 'ДЛСТР', TRIM: 'СЖПРОБЕЛЫ', UPPER: 'ПРОПИСН', LOWER: 'СТРОЧН',
         LEFT: 'ЛЕВСИМВ', RIGHT: 'ПРАВСИМВ', MID: 'ПСТР', CONCAT: 'СЦЕПИТЬ', CONCATENATE: 'СЦЕПИТЬ',
-        SUBSTITUTE: 'ПОДСТАВИТЬ', REPT: 'ПОВТОР', FIND: 'НАЙТИ', SEARCH: 'ПОИСК', VALUE: 'ЗНАЧЕН',
+        SUBSTITUTE: 'ПОДСТАВИТЬ', REPT: 'ПОВТОР', FIND: 'НАЙТИ', SEARCH: 'ПОИСК', VALUE: 'ЗНАЧЕН', EXACT: 'СОВПАД',
         SUM: 'СУММ', PRODUCT: 'ПРОИЗВЕД', MIN: 'МИН', MAX: 'МАКС', AVERAGE: 'СРЗНАЧ',
         COUNT: 'СЧЁТ', СЧЕТ: 'СЧЁТ', COUNTA: 'СЧЁТЗ',
         ROUND: 'ОКРУГЛ', ROUNDUP: 'ОКРУГЛВВЕРХ', ROUNDDOWN: 'ОКРУГЛВНИЗ',
